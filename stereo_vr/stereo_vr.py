@@ -80,7 +80,32 @@ def equirectangular_to_perspective(img, fov_deg, yaw_deg, pitch_deg, out_w, out_
 
 def compute_disparity(left, right, num_disp=128, block_size=9):
     min_disp = 0
-    num_disp = (num_disp // 16) * 16
+    h, w = left.shape[:2]
+
+    # If caller passed <=0, choose a conservative default based on image width
+    if num_disp is None or int(num_disp) <= 0:
+        guess = max(16, w // 4)
+    else:
+        guess = int(num_disp)
+
+    # ensure num_disp is a positive multiple of 16 (requirement for SGBM)
+    num_disp = max(16, (guess // 16) * 16)
+    # To allow matches for left-edge columns when disparity range extends left of image,
+    # pad both images on the left by `num_disp` pixels using wrap-around mapping so
+    # left-edge pixels have corresponding search space in the right image. After
+    # computing disparity on the padded images, crop back to the original width.
+    pad = num_disp
+    if pad < 0:
+        pad = 0
+
+    if pad > 0:
+        # use numpy.wrap padding which mirrors equirectangular horizontal wrap behavior
+        left_p = np.pad(left, ((0, 0), (pad, 0)), mode='wrap')
+        right_p = np.pad(right, ((0, 0), (pad, 0)), mode='wrap')
+    else:
+        left_p = left
+        right_p = right
+
     stereo = cv2.StereoSGBM_create(minDisparity=min_disp,
                                    numDisparities=num_disp,
                                    blockSize=block_size,
@@ -90,7 +115,13 @@ def compute_disparity(left, right, num_disp=128, block_size=9):
                                    uniquenessRatio=10,
                                    speckleWindowSize=100,
                                    speckleRange=32)
-    disp = stereo.compute(left, right).astype(np.float32) / 16.0
+    disp_full = stereo.compute(left_p, right_p).astype(np.float32) / 16.0
+
+    if pad > 0:
+        # crop back to original width
+        disp = disp_full[:, pad:pad + w]
+    else:
+        disp = disp_full
     return disp
 
 
