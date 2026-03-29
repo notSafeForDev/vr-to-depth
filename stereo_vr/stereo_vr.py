@@ -285,6 +285,12 @@ def main():
     parser.add_argument('--debug-radius', type=float, default=1.0, help='Radius for debug PLY points (units)')
     args = parser.parse_args()
 
+    # ensure output directory exists and route outputs there
+    out_dir = 'output'
+    os.makedirs(out_dir, exist_ok=True)
+    out_basename = os.path.splitext(os.path.basename(args.out))[0]
+    out_base = os.path.join(out_dir, out_basename)
+
     # Support either: (A) single side-by-side image, or (B) two separate files
     if args.right:
         left_e = cv2.imread(args.pair, cv2.IMREAD_COLOR)
@@ -317,7 +323,7 @@ def main():
 
     # optional debug PLY: map each pixel's direction to a constant-radius point
     if args.debug_ply:
-        base = os.path.splitext(args.out)[0]
+        base = out_base
         # normalize direction vectors and scale to debug radius
         lv = left_vec.astype(np.float64)
         norms = np.linalg.norm(lv, axis=2)
@@ -327,11 +333,12 @@ def main():
         # flip Y so +Y points forward in viewer conventions
         pts_debug[:, 1] *= -1.0
         cols = left_p.reshape(-1, 3)
-        save_ply(f'{base}_debug.ply', pts_debug, cols)
-        print('Saved debug PLY', f'{base}_debug.ply')
+        debug_ply_path = f'{base}_debug.ply'
+        save_ply(debug_ply_path, pts_debug, cols)
+        print('Saved debug PLY', debug_ply_path)
 
     if args.debug_save:
-        base = os.path.splitext(args.out)[0]
+        base = out_base
         cv2.imwrite(f'{base}_left_persp.png', left_p)
         cv2.imwrite(f'{base}_right_persp.png', right_p)
 
@@ -343,20 +350,22 @@ def main():
         else:
             disp_norm = np.zeros_like(disp_vis, dtype=np.uint8)
         disp_color = cv2.applyColorMap(disp_norm, cv2.COLORMAP_JET)
-        cv2.imwrite(f'{base}_disp.png', disp_color)
 
         mask = disp > 0
         left_masked = left_p.copy()
         left_masked[~mask] = (0, 0, 0)
+        cv2.imwrite(f'{base}_disp.png', disp_color)
+
         cv2.imwrite(f'{base}_left_masked.png', left_masked)
 
     # compute focal length in pixels from horizontal FOV
     f_px = args.out_w / (2.0 * np.tan(np.deg2rad(args.fov) / 2.0))
     pts, colors = disparity_to_pointcloud(disp, left_p, left_vec, right_vec, args.baseline, f_px=f_px)
 
-    save_ply(args.out, pts, colors)
+    out_ply = f'{out_base}.ply'
+    save_ply(out_ply, pts, colors)
     # also write OBJ with quad faces and per-vertex colors based on the perspective grid
-    base = os.path.splitext(args.out)[0]
+    base = out_base
     # build per-pixel depth grid and vertex grid
     H, W = disp.shape
     dirs = left_vec.astype(np.float64)
@@ -371,8 +380,9 @@ def main():
 
     verts_grid = unit_dirs * Z[..., None]
     cols_grid = left_p.copy()
-    save_obj_quads(f'{base}.obj', verts_grid, cols_grid, valid_mask=valid)
-    print('Saved', args.out)
+    out_obj = f'{base}.obj'
+    save_obj_quads(out_obj, verts_grid, cols_grid, valid_mask=valid)
+    print('Saved', out_ply)
 
 
 if __name__ == '__main__':
