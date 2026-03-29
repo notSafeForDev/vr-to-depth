@@ -192,76 +192,6 @@ def save_ply(filename, verts, colors):
             f.write(f'{p[0]} {p[1]} {p[2]} {int(c[2])} {int(c[1])} {int(c[0])}\n')
 
 
-def save_obj_quads(filename, verts_grid, colors_grid, valid_mask=None, quad_size=0.01):
-    """Write an OBJ where each valid point is rendered as a small quad.
-
-    - verts_grid: (H,W,3) float array of vertex positions
-    - colors_grid: (H,W,3) uint8 BGR colors (0-255)
-    - valid_mask: optional (H,W) boolean mask of valid vertices; if None, any finite vertex is valid
-    - quad_size: world-space side length of each quad (default 0.01)
-    """
-    H, W, _ = verts_grid.shape
-    verts_flat = verts_grid.reshape(-1, 3)
-    cols_flat = colors_grid.reshape(-1, 3)
-
-    if valid_mask is None:
-        good = np.isfinite(verts_flat).all(axis=1)
-    else:
-        good = valid_mask.reshape(-1)
-
-    with open(filename, 'w') as f:
-        f.write('# OBJ with per-point quads and vertex colors (v x y z r g b)\n')
-
-        vertex_counter = 1
-
-        for v, col, ok in zip(verts_flat, cols_flat, good):
-            if not ok:
-                continue
-            if not np.isfinite(v).all():
-                continue
-
-            # compute an approximate normal (from origin to vertex)
-            n = v.astype(np.float64)
-            nrm = np.linalg.norm(n)
-            if nrm == 0 or np.isnan(nrm):
-                continue
-            n = n / nrm
-
-            # pick a stable 'up' vector to build a tangent basis
-            up = np.array((0.0, 1.0, 0.0), dtype=np.float64)
-            if abs(np.dot(up, n)) > 0.99:
-                up = np.array((1.0, 0.0, 0.0), dtype=np.float64)
-
-            t1 = np.cross(up, n)
-            t1n = np.linalg.norm(t1)
-            if t1n == 0 or np.isnan(t1n):
-                continue
-            t1 = t1 / t1n
-            t2 = np.cross(n, t1)
-
-            half = float(quad_size) * 0.5
-
-            p1 = v - t1 * half - t2 * half
-            p2 = v + t1 * half - t2 * half
-            p3 = v + t1 * half + t2 * half
-            p4 = v - t1 * half + t2 * half
-
-            # write four vertices with color (convert BGR->RGB in 0..1 range)
-            r = float(col[2]) / 255.0
-            g = float(col[1]) / 255.0
-            b = float(col[0]) / 255.0
-
-            f.write(f'v {p1[0]} {p1[1]} {p1[2]} {r} {g} {b}\n')
-            f.write(f'v {p2[0]} {p2[1]} {p2[2]} {r} {g} {b}\n')
-            f.write(f'v {p3[0]} {p3[1]} {p3[2]} {r} {g} {b}\n')
-            f.write(f'v {p4[0]} {p4[1]} {p4[2]} {r} {g} {b}\n')
-
-            # emit a quad face using the four newly written vertices
-            f.write(f'f {vertex_counter} {vertex_counter+1} {vertex_counter+2} {vertex_counter+3}\n')
-            vertex_counter += 4
-
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('pair',
@@ -378,10 +308,6 @@ def main():
     if f_px is not None:
         Z[valid] = (f_px * float(args.baseline)) / disp[valid]
 
-    verts_grid = unit_dirs * Z[..., None]
-    cols_grid = left_p.copy()
-    out_obj = f'{base}.obj'
-    save_obj_quads(out_obj, verts_grid, cols_grid, valid_mask=valid)
     print('Saved', out_ply)
 
 
