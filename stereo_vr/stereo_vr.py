@@ -180,7 +180,7 @@ def save_ply(filename, verts, colors):
     with open(filename, 'w') as f:
         f.write('ply\n')
         f.write('format ascii 1.0\n')
-        f.write(f'element vertex {len(verts)}\n')
+        f.write('element vertex {}\n'.format(len(verts)))
         f.write('property float x\n')
         f.write('property float y\n')
         f.write('property float z\n')
@@ -189,7 +189,7 @@ def save_ply(filename, verts, colors):
         f.write('property uchar blue\n')
         f.write('end_header\n')
         for p, c in zip(verts, colors):
-            f.write(f'{p[0]} {p[1]} {p[2]} {int(c[2])} {int(c[1])} {int(c[0])}\n')
+            f.write('{} {} {} {} {} {}\n'.format(p[0], p[1], p[2], int(c[2]), int(c[1]), int(c[0])))
 
 
 def main():
@@ -249,7 +249,75 @@ def main():
     left_gray = cv2.cvtColor(left_p, cv2.COLOR_BGR2GRAY)
     right_gray = cv2.cvtColor(right_p, cv2.COLOR_BGR2GRAY)
 
-    disp = compute_disparity(left_gray, right_gray, num_disp=args.num_disp, block_size=args.block_size)
+    # Adaptive disparity attempt: if a large left prefix of columns have zero valid disparities
+    # (commonly caused by too-large numDisparities), reduce num_disp and retry a few times.
+    initial_num_disp = args.num_disp
+    if initial_num_disp is None:
+        initial_num_disp = 0
+
+    num_disp_try = int(initial_num_disp)
+    if num_disp_try <= 0:
+        # let compute_disparity choose a reasonable default internally
+        num_disp_try = 0
+
+    max_attempts = 4
+    attempt = 0
+    while True:
+        disp = compute_disparity(left_gray, right_gray, num_disp=num_disp_try, block_size=args.block_size)
+        mask = disp > 0
+        h_d, w_d = disp.shape
+        col_counts = np.count_nonzero(mask, axis=0)
+
+        # count contiguous zero columns from the left
+        left_zero_run = 0
+        for c in col_counts:
+            if c == 0:
+                left_zero_run += 1
+            else:
+                break
+
+        # If too many left columns are zero, reduce disparity range and retry
+        if left_zero_run > max(1, int(0.05 * w_d)) and attempt < max_attempts and (num_disp_try <= 0 or num_disp_try > 16):
+            # choose a smaller trial disparity: if unspecified (0) pick w/8, else halve
+            if num_disp_try <= 0:
+                num_disp_try = max(16, (w_d // 8) // 16 * 16)
+            else:
+                num_disp_try = max(16, (num_disp_try // 2) // 16 * 16)
+            print('Detected {} left-zero columns, reducing num_disp to {}'.format(left_zero_run, num_disp_try))
+            attempt += 1
+            continue
+        break
+
+    total_valid = int(np.count_nonzero(mask))
+    if args.debug_save:
+        # basic disparity stats
+        try:
+            disp_min = float(np.nanmin(disp))
+            disp_max = float(np.nanmax(disp))
+        except Exception:
+            disp_min = None
+            disp_max = None
+        mean_disp = float(np.nanmean(disp[mask])) if total_valid > 0 else None
+        print('disp min/max/mean: {} {} {}'.format(disp_min, disp_max, mean_disp))
+        print('valid pixels: {} of {} ({:.2f}%)'.format(total_valid, h_d * w_d, float(total_valid) / float(h_d * w_d) * 100.0))
+
+        # save column counts for inspection
+        try:
+            out_cols_csv = out_base + '_col_counts.csv'
+            np.savetxt(out_cols_csv, col_counts, fmt='%d', delimiter=',')
+            print('Saved column counts to {}'.format(out_cols_csv))
+        except Exception as e:
+            print('Failed to save column counts:', e)
+
+        # create a visual strip image showing valid fraction per column
+        try:
+            col_img = (col_counts.astype(np.float32) / float(h_d) * 255.0).astype(np.uint8)
+            col_strip = np.repeat(col_img.reshape(1, -1), 64, axis=0)
+            out_col_img = out_base + '_col_valid.png'
+            cv2.imwrite(out_col_img, col_strip)
+            print('Saved column-valid image to {}'.format(out_col_img))
+        except Exception as e:
+            print('Failed to write column-valid image:', e)
 
     # optional debug PLY: map each pixel's direction to a constant-radius point
     if args.debug_ply:
