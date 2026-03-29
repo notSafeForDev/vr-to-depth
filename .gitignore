@@ -1,0 +1,23 @@
+# Ignore input and output folders for large images and generated files
+/input/
+/output/
+
+# Common generated/temporary files
+*.ply
+*.obj
+*_debug.ply
+*_left_persp.png
+*_right_persp.png
+*_disp.png
+*_left_masked.png
+
+# Python virtual env
+venv/
+env/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
